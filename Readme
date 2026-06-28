@@ -1,0 +1,200 @@
+# PMO Executive Dashboard — Google Sheets + Apps Script + Looker Studio
+
+**Live Dashboard:** [PMO Dashboard](https://datastudio.google.com/s/hxHjHqEAJUo)
+
+A lightweight Project Management Office (PMO) reporting pipeline that takes a raw project export, cleans and enriches it with schedule-performance metrics via Google Apps Script, and visualizes the results in a Looker Studio executive dashboard.
+
+---
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Why I Built This](#why-i-built-this)
+3. [What the Dashboard Shows](#what-the-dashboard-shows)
+4. [Architecture](#architecture)
+5. [Data Model](#data-model)
+6. [The Apps Script Logic](#the-apps-script-logic)
+7. [Metrics & Formulas](#metrics--formulas)
+8. [How to Replicate](#how-to-replicate)
+9. [File Structure](#file-structure)
+10. [Known Limitations](#known-limitations)
+11. [Future Improvements](#future-improvements)
+
+---
+
+## Overview
+
+This project transforms a messy project register (239 projects) into an executive-ready dashboard tracking portfolio health, schedule performance, and budget efficiency. The entire stack is free-tier Google Workspace — no external DB, no paid BI tool.
+
+**Stack:**
+- **Google Sheets** — raw data store + cleaned output
+- **Google Apps Script** — ETL + KPI calculation
+- **Looker Studio (formerly Data Studio)** — visualization layer
+
+---
+
+## Why I Built This
+
+Most PMO reporting lives in stale spreadsheets that nobody updates and nobody trusts. I wanted to prove that with ~80 lines of Apps Script you can:
+
+- Standardize a raw project export into a consistent schema
+- Calculate real schedule-performance metrics (SPI, time elapsed, drift status) on the fly
+- Backfill missing fields (e.g., Project Manager) without breaking the pipeline
+- Pipe it straight into Looker Studio so leadership sees the same numbers the PMs do
+
+The goal: one source of truth, refreshable on demand, viewable on any device.
+
+---
+
+## What the Dashboard Shows
+
+**Summary KPIs**
+- Total Projects: `239`
+- Portfolio Health: `72.38%`
+- Average CPI (Cost Performance Index): `1.29`
+- Budget Deviation: `16.74%`
+
+**Visualizations**
+- **Project Health Donut** — Green (Healthy) / Yellow (At Risk) / Red (Critical) split
+- **Top 5 High-Risk Projects** — table with project name, risk level, budget spent, efficiency
+- **Complete % vs. Budget Spent %** — bar chart comparing scheduled progress to actual spend per project
+
+A detailed second page contains the full data dump for drill-down.
+
+---
+
+## Architecture
+
+┌─────────────┐      ┌────────────────────┐      ┌──────────────┐      ┌──────────────────┐
+│  Raw Sheet  │ ───► │ Apps Script ETL    │ ───► │ Clean Sheet  │ ───► │ Looker Studio    │
+│ (export)    │      │ samplePMOFormatting│      │ (enriched)   │      │ Dashboard        │
+└─────────────┘      └────────────────────┘      └──────────────┘      └──────────────────┘
+
+
+The script reads from `raw sheet`, computes derived columns, and writes the cleaned dataset to `clean sheet`. Looker Studio uses `clean sheet` as its connected data source.
+
+---
+
+## Data Model
+
+### Raw Sheet (input)
+| Column | Type | Notes |
+|---|---|---|
+| Project ID | string | Unique identifier |
+| Project Name | string | |
+| Start Date | date | MM/DD/YYYY |
+| End Date | date | MM/DD/YYYY |
+| % Complete | number | Accepts `0–1` or `0–100` |
+| Project Manager | string | *Optional — script backfills if missing* |
+| Budget / CPI / etc. | number | Used by Looker, not by the script |
+
+### Clean Sheet (output)
+All of the above, plus three engineered columns:
+- `Time Elapsed %`
+- `SPI` (Schedule Performance Index)
+- `Drift` (`ON TRACK` / `CRITICAL DRIFT` / `DATA ERROR`)
+
+---
+
+## The Apps Script Logic
+
+The script (`samplePMOFormatting`) does the following:
+
+1. **Reads** the raw sheet into a 2D array.
+2. **Normalizes headers** (lowercase + trim) so column lookups don't break on whitespace.
+3. **Detects** whether `Project Manager` exists. If not, it appends the column and round-robins a dummy list (`Rahul Gupta`, `Jack Morrow`, `Nicole Munch`, `Rahul`) for demo purposes.
+4. **Parses** dates and `% complete` per row, defending against `NaN` and zero-duration ranges.
+5. **Calculates** Time Elapsed, SPI, and Drift status against a fixed reference date (`03/28/2025`) — swap this for `new Date()` in production.
+6. **Formats** dates back to `MM/dd/yyyy` strings for Looker compatibility.
+7. **Writes** the cleaned dataset to `clean sheet`, clearing prior contents first.
+
+Defensive behavior: any row with bad dates is tagged `DATA ERROR` in the Drift column instead of crashing the script.
+
+---
+
+## Metrics & Formulas
+
+Time Elapsed % = clamp( (today - start_date) / (end_date - start_date), 0, 1 )
+
+SPI            = % Complete / Time Elapsed %
+
+Drift          = "CRITICAL DRIFT"  if SPI < 0.8
+"ON TRACK"        otherwise
+"DATA ERROR"      if dates are invalid
+
+
+**Interpretation:**
+- `SPI = 1.0` → project is exactly on schedule
+- `SPI > 1.0` → ahead of schedule
+- `SPI < 0.8` → meaningfully behind; flagged Critical
+
+---
+
+## How to Replicate
+
+### 1. Create the Google Sheet
+- New Google Sheet
+- Add two tabs: `raw sheet` and `clean sheet`
+- Paste your project export into `raw sheet` (headers in row 1)
+
+### 2. Add the Apps Script
+- `Extensions` → `Apps Script`
+- Paste the contents of [`script/samplePMOFormatting.gs`](./script/samplePMOFormatting.gs)
+- Save and run `samplePMOFormatting` once (authorize when prompted)
+- Optional: add a time-driven trigger (`Triggers` → daily) to keep `clean sheet` fresh
+
+### 3. Swap the Hard-Coded Date (for production)
+Change:
+```js
+var today_date = new Date("03/28/2025");
+to:
+var today_date = new Date();
+
+4. Connect Looker Studio
+Go to Looker Studio
+Create → Data Source → Google Sheets
+Pick your spreadsheet → select clean sheet
+Set field types (dates as Date, SPI as Number, etc.)
+5. Build the Report
+Recreate the four sections from the screenshot:
+
+Scorecards for Projects, Health %, Avg CPI, Budget Deviation
+Pie chart on Drift / Health status
+Table sorted descending by risk, limit 5
+Bar chart with % Complete and Budget Spent % as two series
+
+File Structure:
+.
+├── README.md
+├── assets/
+│   └── dashboard.png            # Screenshot of the live dashboard
+├── script/
+│   └── samplePMOFormatting.gs   # Apps Script source
+└── sample-data/
+    └── raw_sheet_template.csv   # Optional: headers-only template
+
+Known Limitations
+Reference date is hard-coded to 03/28/2025 for demo reproducibility. Replace with new Date() for live use.
+Dummy Project Managers are injected when the column is missing — fine for demos, remove this block before production.
+No incremental refresh — the script clears and rewrites clean sheet on every run. Fine for ≤10k rows; rewrite as batched updates for larger portfolios.
+CPI and Budget Deviation are surfaced from raw columns; the script doesn't compute them. Add them in the same loop if your raw export lacks them.
+
+Future Improvements:
+
+Replace dummy PM round-robin with a real lookup table
+Add EVM metrics: Earned Value, Planned Value, CV, SV
+Email alerting via MailApp when any project flips to CRITICAL DRIFT
+Move to BigQuery once row count crosses ~50k
+Add a Forecast End Date column using current SPI
+Built with caffeine and a deep distrust of stale spreadsheets.
+
+---
+
+A few notes on what I assumed so you can tweak:
+
+- I named the screenshot `assets/dashboard.png` — rename your upload to match, or change the path in the README.
+- I named the script file `script/samplePMOFormatting.gs` — same deal.
+- I framed the hard-coded `03/28/2025` as a demo choice (which it reads like) and gave instructions to swap it for `new Date()`. If that date is intentional for some audit reason, just delete that bullet.
+- The "dummy managers" callout is honest — if you'd rather not advertise that the PM column is synthetic for demo data, strip the *Why I Built This* + *Known Limitations* mentions.
+
+Want me to also generate the `raw_sheet_template.csv` headers file, or a shorter "TL;DR" version for the repo's About blurb?
+
