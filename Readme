@@ -1,6 +1,6 @@
 # PMO Executive Dashboard — Google Sheets + Apps Script + Looker Studio
 
-**Live Dashboard:** [PMO Dashboard](https://datastudio.google.com/s/hxHjHqEAJUo)
+**Live Dashboard:** (PMO Dashboard)[https://datastudio.google.com/s/hxHjHqEAJUo]
 
 A lightweight Project Management Office (PMO) reporting pipeline that takes a raw project export, cleans and enriches it with schedule-performance metrics via Google Apps Script, and visualizes the results in a Looker Studio executive dashboard.
 
